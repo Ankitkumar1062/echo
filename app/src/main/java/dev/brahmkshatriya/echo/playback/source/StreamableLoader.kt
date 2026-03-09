@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.Normalizer
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -251,18 +252,58 @@ class StreamableLoader(
 
         // 2. Artist word-token hard filter
         if (original.artists.isNotEmpty() && candidate.artists.isNotEmpty()) {
+            val origHasCjk = original.artists.any { hasCjk(it.name) }
+            val candHasCjk = candidate.artists.any { hasCjk(it.name) }
+
             val originalWords = original.artists
-                .flatMap { it.name.lowercase().split(NORMALIZE_NON_ALNUM) }
+                .flatMap {
+                    Normalizer.normalize(it.name, Normalizer.Form.NFKC)
+                        .lowercase().split(NORMALIZE_NON_ALNUM)
+                }
                 .filter { it.length > 1 }
                 .toSet()
 
             if (originalWords.isNotEmpty()) {
                 val hasOverlap = candidate.artists.any { artist ->
-                    artist.name.lowercase().split(NORMALIZE_NON_ALNUM)
+                    Normalizer.normalize(artist.name, Normalizer.Form.NFKC)
+                        .lowercase().split(NORMALIZE_NON_ALNUM)
                         .filter { it.length > 1 }
                         .any { it in originalWords }
                 }
-                if (!hasOverlap) return false
+                if (!hasOverlap) {
+                    // Fallback 1: substring containment of cleaned names.
+                    // Handles cases like "YOASOBI" vs "YOASOBI (幾田りら)".
+                    val origNames = original.artists.map { it.name.cleanTitle() }
+                    val candNames = candidate.artists.map { it.name.cleanTitle() }
+                    val hasSubstring = origNames.any { o ->
+                        candNames.any { c ->
+                            o.isNotBlank() && c.isNotBlank() &&
+                                    (o.contains(c) || c.contains(o))
+                        }
+                    }
+                    if (!hasSubstring) {
+                        // Fallback 2: for same-script CJK, do character-level
+                        // overlap. CJK artist names often share kanji/hanzi even
+                        // with slight formatting differences.
+                        if (origHasCjk && candHasCjk) {
+                            val origChars = original.artists
+                                .flatMap { it.name.filter { c -> c.isLetterOrDigit() }.toList() }
+                                .toSet()
+                            val candChars = candidate.artists
+                                .flatMap { it.name.filter { c -> c.isLetterOrDigit() }.toList() }
+                                .toSet()
+                            val charOverlap = origChars.intersect(candChars).size
+                            val charUnion = origChars.union(candChars).size
+                            // Require >50% character overlap to pass
+                            if (charUnion > 0 && charOverlap * 100 / charUnion < 50) return false
+                        } else if (origHasCjk != candHasCjk) {
+                            // Different scripts — allow through for scoring.
+                        } else {
+                            // Same script, non-CJK, no overlap at all.
+                            return false
+                        }
+                    }
+                }
             }
         }
 
@@ -278,7 +319,7 @@ class StreamableLoader(
         // Strip upload/marketing noise from the original title before querying so that
         // search engines receive the cleanest possible intent (e.g. no "(Official Audio)").
         val cleanedQueryTitle = original.title.let { raw ->
-            var s = raw
+            var s = Normalizer.normalize(raw, Normalizer.Form.NFKC)
             for (pattern in TITLE_NOISE) s = s.replace(pattern, " ")
             s.replace(NORMALIZE_WHITESPACE, " ").trim()
         }
@@ -359,10 +400,22 @@ class StreamableLoader(
                     it.title.equals("Song", ignoreCase = true)
         }
 
-        val tracks = extractTracks(feed.getPagedData(songsTab))
-        // If Songs tab returned nothing, fall back to the default tab.
-        if (tracks.isEmpty() && songsTab != null) return extractTracks(feed.getPagedData(null))
-        return tracks
+        val songTracks = extractTracks(feed.getPagedData(songsTab))
+
+        // Also pull from the "Videos" tab — on YT Music many official CJK tracks
+        // are only available as videos, so we must include them for the scorer.
+        val videosTab = feed.tabs.firstOrNull {
+            it.title.equals("Videos", ignoreCase = true) ||
+                    it.title.equals("Video", ignoreCase = true)
+        }
+        val videoTracks = if (videosTab != null) extractTracks(feed.getPagedData(videosTab))
+        else emptyList()
+
+        val merged = (songTracks + videoTracks).distinctBy { it.id }
+        if (merged.isNotEmpty()) return merged
+
+        // If both tabs returned nothing, fall back to the default tab.
+        return extractTracks(feed.getPagedData(null))
     }
 
     private suspend fun extractTracks(data: Feed.Data<Shelf>): List<Track> {
@@ -389,9 +442,12 @@ class StreamableLoader(
         // ── Altered-version penalty ──────────────────────────────────────────
         // If the ORIGINAL is not an altered version itself (instrumental, karaoke,
         // cover, remix, etc.) but the CANDIDATE carries such a marker in its raw
-        // title, penalise heavily so the real recording is strongly preferred.
+        // title, subtitle, or description, penalise heavily so the real recording
+        // is strongly preferred.
         val originalIsAltered = a.title.isAlteredVersion()
-        val candidateIsAltered = b.title.isAlteredVersion()
+        val candidateIsAltered = b.title.isAlteredVersion() ||
+                b.subtitle.orEmpty().isAlteredVersion() ||
+                b.description.orEmpty().isAlteredVersion()
         if (!originalIsAltered && candidateIsAltered) {
             score -= 120
         }
@@ -410,18 +466,39 @@ class StreamableLoader(
         val bTitle = b.title.cleanTitle()
         if (aTitle == bTitle) {
             score += 80
-        } else {
-            val aWords = aTitle.split(" ").filter { it.isNotBlank() }.toSet()
-            val bWords = bTitle.split(" ").filter { it.isNotBlank() }.toSet()
-            if (aWords.isNotEmpty() && bWords.isNotEmpty()) {
-                val overlap = aWords.intersect(bWords).size
-                val union = aWords.union(bWords).size
-                // Jaccard similarity scaled to 0..65
-                val jaccard = overlap * 65 / union
-                score += jaccard
-                // Bonus if one title fully contains the other's words
-                val smaller = min(aWords.size, bWords.size)
-                if (smaller > 0 && overlap == smaller) score += 15
+        } else if (aTitle.isNotBlank() && bTitle.isNotBlank()) {
+            // For CJK text, word-splitting by spaces is unreliable (no word boundaries).
+            // Use character-level Jaccard for CJK, word-level for Latin.
+            val aCjk = hasCjk(aTitle)
+            val bCjk = hasCjk(bTitle)
+            if (aCjk || bCjk) {
+                // Character-level comparison for CJK.
+                // Extract only CJK/letter characters for overlap, ignore spaces/punct.
+                val aChars = aTitle.filter { it.isLetterOrDigit() }.toSet()
+                val bChars = bTitle.filter { it.isLetterOrDigit() }.toSet()
+                if (aChars.isNotEmpty() && bChars.isNotEmpty()) {
+                    val overlap = aChars.intersect(bChars).size
+                    val union = aChars.union(bChars).size
+                    val charJaccard = overlap * 70 / union
+                    score += charJaccard
+                    // Bonus: one title fully contains the other (very common for
+                    // CJK where the same song title may have extra qualifiers).
+                    val shorter = if (aTitle.length <= bTitle.length) aTitle else bTitle
+                    val longer = if (aTitle.length <= bTitle.length) bTitle else aTitle
+                    if (longer.contains(shorter)) score += 15
+                }
+            } else {
+                // Word-level Jaccard for Latin/space-delimited text.
+                val aWords = aTitle.split(" ").filter { it.isNotBlank() }.toSet()
+                val bWords = bTitle.split(" ").filter { it.isNotBlank() }.toSet()
+                if (aWords.isNotEmpty() && bWords.isNotEmpty()) {
+                    val overlap = aWords.intersect(bWords).size
+                    val union = aWords.union(bWords).size
+                    val jaccard = overlap * 65 / union
+                    score += jaccard
+                    val smaller = min(aWords.size, bWords.size)
+                    if (smaller > 0 && overlap == smaller) score += 15
+                }
             }
         }
 
@@ -450,22 +527,53 @@ class StreamableLoader(
         val anyArtistOverlap = aArtistSet.intersect(bArtistSet).isNotEmpty()
 
         if (aPrimary != null && bPrimary != null) {
+            // Detect cross-script comparisons (CJK vs Latin / romanized).
+            // When scripts don't overlap, names may still refer to the same
+            // artist in different character sets.
+            val crossScript = hasCjk(a.artists.first().name) != hasCjk(b.artists.first().name)
             when {
                 aPrimary == bPrimary ->
-                    score += 50  // exact primary match
+                    score += 80  // exact primary match
                 aPrimary.contains(bPrimary) || bPrimary.contains(aPrimary) ->
-                    score += 30  // one name contains the other (e.g. "The Weeknd" vs "Weeknd")
+                    score += 50  // one name contains the other (e.g. "The Weeknd" vs "Weeknd")
                 anyArtistOverlap ->
-                    score += 15  // at least one featured/collaborating artist matches
+                    score += 25  // at least one featured/collaborating artist matches
+                crossScript -> {
+                    // Different scripts (e.g. 米津玄師 vs Kenshi Yonezu) — try secondary
+                    // matching: check if the original's raw artist names appear in the
+                    // candidate's subtitle, description, or raw title (some platforms
+                    // embed artist info there, e.g. "YOASOBI - 夜に駆ける").
+                    val origRawNames = a.artists.map { it.name.lowercase().trim() }
+                    val candText = listOfNotNull(
+                        b.subtitle, b.description,
+                        b.artists.joinToString(" ") { it.name }
+                    ).joinToString(" ").lowercase()
+                    val foundInMeta = origRawNames.any { name ->
+                        name.isNotBlank() && candText.contains(name)
+                    }
+                    // Also check reverse: candidate raw artist names in original metadata.
+                    val candRawNames = b.artists.map { it.name.lowercase().trim() }
+                    val origText = listOfNotNull(
+                        a.subtitle, a.description,
+                        a.artists.joinToString(" ") { it.name }
+                    ).joinToString(" ").lowercase()
+                    val foundReverse = candRawNames.any { name ->
+                        name.isNotBlank() && origText.contains(name)
+                    }
+                    score += when {
+                        foundInMeta || foundReverse -> 30  // secondary evidence of same artist
+                        else -> -25  // no evidence — likely different artist
+                    }
+                }
                 else ->
                     // No artist overlap at all — likely a cover or tribute by a different artist.
-                    score -= 60
+                    score -= 100
             }
         }
 
-        // ── Additional artist overlap bonus (+15 each) ──
+        // ── Additional artist overlap bonus (+20 each) ──
         if (a.artists.size > 1 || b.artists.size > 1) {
-            score += (aArtistSet.intersect(bArtistSet).size * 15)
+            score += (aArtistSet.intersect(bArtistSet).size * 20)
         }
 
         // ── Title word-count bloat penalty (up to -25) ──
@@ -475,11 +583,6 @@ class StreamableLoader(
         val bWordCount = bTitle.split(" ").count { it.isNotBlank() }
         val excessWords = bWordCount - aWordCount
         if (excessWords >= 3) score -= ((excessWords - 2) * 7).coerceAtMost(25)
-
-        // ── Album match (+20) ──
-        val aAlbum = a.album?.title?.cleanTitle()
-        val bAlbum = b.album?.title?.cleanTitle()
-        if (!aAlbum.isNullOrBlank() && !bAlbum.isNullOrBlank() && aAlbum == bAlbum) score += 20
 
         // ── Album track-order number (+10) ──
         // Rare but high-confidence: same track number in the same catalogue position.
@@ -503,6 +606,36 @@ class StreamableLoader(
         // ── Explicit flag agreement (+5 / -5) ──
         if (a.isExplicit == b.isExplicit) score += 5 else score -= 5
 
+        // ── Play count popularity signal (up to +40) ──
+        // Original recordings almost always have dramatically more plays than
+        // covers/re-uploads. When multiple candidates have matching titles, this
+        // is often the decisive tiebreaker, especially for CJK songs where many
+        // covers exist with clean (unmarked) titles.
+        val bPlays = b.plays
+        if (bPlays != null && bPlays > 0) {
+            score += when {
+                bPlays >= 10_000_000L -> 40   // 10M+  — almost certainly official
+                bPlays >= 1_000_000L  -> 30   // 1M+   — very likely official
+                bPlays >= 100_000L    -> 15   // 100K+ — popular, could be either
+                bPlays >= 10_000L     -> 5    // 10K+  — modest
+                else                  -> 0
+            }
+        }
+
+        // ── Album presence signal ──
+        // When the original track belongs to an album, candidates that also have
+        // album info are more likely to be official releases. Covers/re-uploads
+        // rarely have album metadata.
+        if (a.album != null) {
+            val aAlbum = a.album?.title?.cleanTitle()
+            val bAlbum = b.album?.title?.cleanTitle()
+            if (!bAlbum.isNullOrBlank()) {
+                score += if (!aAlbum.isNullOrBlank() && aAlbum == bAlbum) 25 else 10
+            } else {
+                score -= 10  // candidate has no album but original does
+            }
+        }
+
         // ── Type preference: Song > VideoSong > rest ──
         score += when (b.type) {
             Track.Type.Song -> 25
@@ -519,6 +652,23 @@ class StreamableLoader(
         // Using this instead of [a-z0-9] so non-Latin titles are NOT stripped to empty string.
         private val NORMALIZE_NON_ALNUM = "[^\\p{L}0-9 ]".toRegex()
         private val NORMALIZE_WHITESPACE = "\\s+".toRegex()
+        // Removes spaces that appear between CJK characters. Different sources
+        // may or may not insert spaces in CJK strings; normalising them away
+        // improves exact-match hit rate.
+        private val NORMALIZE_CJK_SPACE = "(?<=[\u3040-\u9FFF\uAC00-\uD7AF])\\s+(?=[\u3040-\u9FFF\uAC00-\uD7AF])".toRegex()
+
+        /**
+         * Returns true if [s] contains CJK characters (Chinese, Japanese Kanji,
+         * Hiragana, Katakana, or Korean Hangul).
+         */
+        private fun hasCjk(s: String): Boolean = s.any {
+            it.code in 0x4E00..0x9FFF ||  // CJK Unified Ideographs
+                    it.code in 0x3040..0x309F ||  // Hiragana
+                    it.code in 0x30A0..0x30FF ||  // Katakana
+                    it.code in 0xAC00..0xD7AF ||  // Hangul Syllables
+                    it.code in 0x3400..0x4DBF ||  // CJK Extension A
+                    it.code in 0xFF65..0xFF9F     // Half-width Katakana
+        }
 
         // Noise patterns stripped before comparison (case-insensitive).
         private val TITLE_NOISE = listOf(
@@ -563,7 +713,22 @@ class StreamableLoader(
             "\\(speed\\s*up\\)",
             "\\[speed\\s*up]",
             "\\(nightcore\\)",
-            "\\[nightcore]"
+            "\\[nightcore]",
+            // CJK title noise
+            "\\(公式\\)",              // Japanese: "(official)"
+            "\\[公式]",
+            "\\(完整版\\)",            // Chinese: "(full version)"
+            "\\[完整版]",
+            "\\(官方\\)",              // Chinese: "(official)"
+            "\\[官方]",
+            "\\(官方MV\\)",            // Chinese: "(official MV)"
+            "\\[官方MV]",
+            "\\(高音質\\)",            // Japanese: "(high quality)"
+            "\\[高音質]",
+            "\\(MV\\)",
+            "\\[MV]",
+            "【[^】]*】",               // Japanese/Chinese bracket markers (e.g. 【公式MV】)
+            "「[^」]*」"                // Japanese quote markers often used for tags
         ).map { it.toRegex(RegexOption.IGNORE_CASE) }
 
         /**
@@ -598,7 +763,16 @@ class StreamableLoader(
             "\\bdub\\s+(mix|version)\\b",
             "\\bbacking\\s+track\\b",
             "\\bfan\\s+(made|edit)\\b",
-            "\\bun?official\\b"
+            "\\bun?official\b",
+            // CJK cover/non-original markers
+            "歌ってみた",     // Japanese: "tried singing" (common cover tag)
+            "弾いてみた",     // Japanese: "tried playing" (instrumental cover)
+            "演奏してみた",   // Japanese: "tried performing"
+            "叩いてみた",     // Japanese: "tried drumming"
+            "カバー",         // Japanese katakana for "cover"
+            "翻唱",           // Chinese: "cover"
+            "伴奏",           // Chinese: "accompaniment" / instrumental
+            "cover\\b"       // common in CJK titles mixed with English
         ).map { it.toRegex(RegexOption.IGNORE_CASE) }
 
         /** LRU cache: "primaryExtId:originalTrackId" → (resolved candidate Track, source extension ID) */
@@ -611,10 +785,14 @@ class StreamableLoader(
 
     /** Normalize and strip noise from a title / artist name for comparison. */
     private fun String.cleanTitle(): String {
-        var s = this
+        // NFKC normalization converts full-width characters to half-width equivalents
+        // (e.g. Ａ→A, ０→0, half-width katakana→full-width) so CJK and Latin text
+        // can be compared reliably.
+        var s = Normalizer.normalize(this, Normalizer.Form.NFKC)
         for (pattern in TITLE_NOISE) s = s.replace(pattern, " ")
         return s.lowercase()
             .replace(NORMALIZE_NON_ALNUM, " ")
+            .replace(NORMALIZE_CJK_SPACE, "")  // remove spaces between CJK runs
             .replace(NORMALIZE_WHITESPACE, " ")
             .trim()
     }
