@@ -46,6 +46,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HIDDEN
 import com.google.android.material.slider.Slider
 import dev.brahmkshatriya.echo.R
 import dev.brahmkshatriya.echo.common.models.EchoMediaItem
+import dev.brahmkshatriya.echo.common.models.Lyrics
 import dev.brahmkshatriya.echo.common.models.Streamable
 import dev.brahmkshatriya.echo.databinding.FragmentPlayerBinding
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.background
@@ -66,6 +67,7 @@ import dev.brahmkshatriya.echo.ui.media.more.MediaMoreBottomSheet
 import dev.brahmkshatriya.echo.ui.player.PlayerColors.Companion.defaultPlayerColors
 import dev.brahmkshatriya.echo.ui.player.PlayerColors.Companion.getColorsFrom
 import dev.brahmkshatriya.echo.ui.player.PlayerTrackAdapter.Companion.configureClicking
+import dev.brahmkshatriya.echo.ui.player.more.lyrics.LyricsViewModel
 import dev.brahmkshatriya.echo.ui.player.quality.FormatUtils.getDetails
 import dev.brahmkshatriya.echo.ui.player.quality.QualitySelectionBottomSheet
 import dev.brahmkshatriya.echo.utils.ContextUtils.emit
@@ -94,6 +96,10 @@ class PlayerFragment : Fragment() {
     private var binding by autoClearedNullable<FragmentPlayerBinding>()
     private val viewModel by activityViewModel<PlayerViewModel>()
     private val uiViewModel by activityViewModel<UiViewModel>()
+    private val lyricsViewModel by activityViewModel<LyricsViewModel>() // <-- NEW: Injecting the lyrics
+
+    private var currentLyricsList: List<Lyrics.Item>? = null // <-- NEW: State to hold parsed lyrics
+
     private val adapter by lazy {
         PlayerTrackAdapter(uiViewModel, viewModel.playerState.current, adapterListener)
     }
@@ -114,7 +120,43 @@ class PlayerFragment : Fragment() {
         configureColors()
         configurePlayerControls()
         configureBackgroundPlayerView()
+        configureLiveLyrics() // <-- NEW: Start listening for live lyrics
     }
+
+    // --- NEW: The Live Lyric Engine ---
+    private fun configureLiveLyrics() {
+        // 1. Download and parse the lyrics when a new song starts
+        observe(lyricsViewModel.lyricsState) { state ->
+            val lyricsItem = (state as? LyricsViewModel.State.Loaded)?.result?.getOrNull()
+            currentLyricsList = when (val lyrics = lyricsItem?.lyrics) {
+                is Lyrics.Simple -> listOf(Lyrics.Item(lyrics.text, 0, 0))
+                is Lyrics.Timed -> lyrics.list
+                is Lyrics.WordByWord -> lyrics.list.flatten()
+                null -> emptyList()
+                else -> emptyList()
+            }
+            binding?.currentLyricText?.text = ""
+        }
+
+        // 2. Watch the song's exact millisecond timer and update the text instantly
+        observe(viewModel.progress) { (curr, _) ->
+            val list = currentLyricsList ?: return@observe
+            val currentIndex = list.indexOfLast { it.startTime <= curr }
+
+            if (currentIndex >= 0 && currentIndex < list.size) {
+                val line = list[currentIndex].text.trim()
+                // Only update the UI if the line actually changed to prevent flickering
+                if (binding?.currentLyricText?.text != line) {
+                    binding?.currentLyricText?.text = line
+                }
+            } else {
+                if (binding?.currentLyricText?.text != "") {
+                    binding?.currentLyricText?.text = ""
+                }
+            }
+        }
+    }
+    // ----------------------------------
 
     private val collapseHeight by lazy {
         resources.getDimension(R.dimen.collapsed_cover_size).toInt()
@@ -214,6 +256,11 @@ class PlayerFragment : Fragment() {
                 translationY = collapseHeight * offset * 2
                 alpha = alphaInv
                 isVisible = offset < 1
+            }
+            binding.currentLyricText?.let { textUi ->
+                textUi.translationY = collapseHeight * offset * 2
+                textUi.alpha = alphaInv
+                textUi.isVisible = offset < 1
             }
             currTop = uiViewModel.run {
                 val top = if (playerSheetState.value != STATE_EXPANDED) 0

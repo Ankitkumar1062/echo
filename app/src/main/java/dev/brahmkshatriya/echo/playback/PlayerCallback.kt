@@ -49,6 +49,10 @@ import dev.brahmkshatriya.echo.extensions.ExtensionUtils.getExtensionOrThrow
 import dev.brahmkshatriya.echo.extensions.MediaState
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.extensionId
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.track
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_CATALOG_EXTENSION_ID
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_ENABLED
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_EXTENSION_ID
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS
 import dev.brahmkshatriya.echo.playback.ResumptionUtils.recoverPlaylist
 import dev.brahmkshatriya.echo.playback.ResumptionUtils.recoverRepeat
 import dev.brahmkshatriya.echo.playback.ResumptionUtils.recoverShuffle
@@ -230,6 +234,8 @@ class PlayerCallback(
     private fun playItem(player: Player, args: Bundle) = scope.future {
         val error = SessionResult(SessionError.ERROR_UNKNOWN)
         val extId = args.getString("extId") ?: return@future error
+        val playbackExtIds = app.resolvePlaybackExtensions(extId)
+        val primaryExtId = playbackExtIds.first()
         val item = args.getSerialized<EchoMediaItem>("item")?.getOrNull() ?: return@future error
         val loaded = args.getBoolean("loaded", false)
         val shuffle = args.getBoolean("shuffle", false)
@@ -237,7 +243,8 @@ class PlayerCallback(
         when (item) {
             is Track -> {
                 val mediaItem = MediaItemUtils.build(
-                    app, downloadFlow.value, MediaState.Unloaded(extId, item), null
+                    app, downloadFlow.value, MediaState.Unloaded(primaryExtId, item), null,
+                    playbackExtIds
                 )
                 player.with {
                     setMediaItem(mediaItem)
@@ -247,7 +254,7 @@ class PlayerCallback(
                 }
             }
 
-            else -> {
+            is Album, is Artist, is Playlist, is Radio -> {
                 val tracks = listTracks(extension, item, loaded).getOrElse {
                     throwableFlow.emit(it)
                     return@future error
@@ -262,7 +269,8 @@ class PlayerCallback(
                             return@launch
                         }.drop(list.size).map {
                             MediaItemUtils.build(
-                                app, downloadFlow.value, MediaState.Unloaded(extId, it), item
+                                app, downloadFlow.value, MediaState.Unloaded(primaryExtId, it), item,
+                                playbackExtIds
                             )
                         }
                         player.with { addMediaItems(list.size, all) }
@@ -276,7 +284,8 @@ class PlayerCallback(
                 player.with {
                     setMediaItems(list.map {
                         MediaItemUtils.build(
-                            app, downloadFlow.value, MediaState.Unloaded(extId, it), item
+                            app, downloadFlow.value, MediaState.Unloaded(primaryExtId, it), item,
+                            playbackExtIds
                         )
                     })
                     shuffleModeEnabled = shuffle
@@ -309,6 +318,8 @@ class PlayerCallback(
     private fun addToQueue(player: Player, args: Bundle) = scope.future {
         val error = SessionResult(SessionError.ERROR_UNKNOWN)
         val extId = args.getString("extId") ?: return@future error
+        val playbackExtIds = app.resolvePlaybackExtensions(extId)
+        val primaryExtId = playbackExtIds.first()
         val item = args.getSerialized<EchoMediaItem>("item")?.getOrNull() ?: return@future error
         val loaded = args.getBoolean("loaded", false)
         val extension = extensions.music.getExtension(extId) ?: return@future error
@@ -324,8 +335,9 @@ class PlayerCallback(
             MediaItemUtils.build(
                 app,
                 downloadFlow.value,
-                MediaState.Unloaded(extId, track),
-                null
+                MediaState.Unloaded(primaryExtId, track),
+                null,
+                playbackExtIds
             )
         }
         player.with {
@@ -340,6 +352,8 @@ class PlayerCallback(
     private fun addToNext(player: Player, args: Bundle) = scope.future {
         val error = SessionResult(SessionError.ERROR_UNKNOWN)
         val extId = args.getString("extId") ?: return@future error
+        val playbackExtIds = app.resolvePlaybackExtensions(extId)
+        val primaryExtId = playbackExtIds.first()
         val item = args.getSerialized<EchoMediaItem>("item")?.getOrNull() ?: return@future error
         val loaded = args.getBoolean("loaded", false)
         val extension = extensions.music.getExtension(extId) ?: return@future error
@@ -356,8 +370,9 @@ class PlayerCallback(
             MediaItemUtils.build(
                 app,
                 downloadFlow.value,
-                MediaState.Unloaded(extId, track),
-                null
+                MediaState.Unloaded(primaryExtId, track),
+                null,
+                playbackExtIds
             )
         }
         player.with {
@@ -428,6 +443,39 @@ class PlayerCallback(
     }
 
     companion object {
+        /**
+         * Returns an ordered list of playback extension IDs to try for [catalogExtensionId].
+         * When the Spotify proxy is disabled (or this isn't the catalog extension) the list
+         * contains only [catalogExtensionId] itself, so callers need no special-case logic.
+         *
+         * Resolution order for the extension list:
+         *  1. New comma-separated setting [SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS] (e.g. "youtube, jiosaavn")
+         *  2. Legacy single-ID setting [SPOTIFY_PROXY_PLAYBACK_EXTENSION_ID]
+         *  3. Falls back to [catalogExtensionId] if both are blank.
+         */
+        fun App.resolvePlaybackExtensions(catalogExtensionId: String): List<String> {
+            val settings = this.settings
+            if (!settings.getBoolean(SPOTIFY_PROXY_PLAYBACK_ENABLED, false)) {
+                return listOf(catalogExtensionId)
+            }
+            val catalog = settings.getString(
+                SPOTIFY_PROXY_CATALOG_EXTENSION_ID,
+                "spotify"
+            )?.trim().orEmpty()
+            if (catalogExtensionId != catalog) return listOf(catalogExtensionId)
+
+            // Try the new multi-extension setting first.
+            val multiRaw = settings.getString(SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS, "")?.trim().orEmpty()
+            if (multiRaw.isNotBlank()) {
+                val ids = multiRaw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                if (ids.isNotEmpty()) return ids
+            }
+
+            // Fall back to the old single-ID setting.
+            val single = settings.getString(SPOTIFY_PROXY_PLAYBACK_EXTENSION_ID, "")?.trim().orEmpty()
+            return listOf(single.ifBlank { catalogExtensionId })
+        }
+
         fun PagedData<Shelf>.toTracks() = map {
             it.getOrThrow().mapNotNull { shelf ->
                 when (shelf) {

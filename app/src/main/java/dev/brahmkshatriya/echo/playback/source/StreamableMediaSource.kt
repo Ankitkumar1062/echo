@@ -30,6 +30,7 @@ import dev.brahmkshatriya.echo.playback.MediaItemUtils.retries
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.serverIndex
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.sourceIndex
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.subtitleIndex
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.track
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.select
 import dev.brahmkshatriya.echo.playback.PlayerState
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +70,10 @@ class StreamableMediaSource(
             }
             val server = serv.getOrNull()
             state.servers[new.mediaId] = serv
+            // Also store under track.id; proxy resolution may change the
+            // track so track.id (used in the URI Key) can differ from mediaId.
+            val trackId = new.track.id
+            if (trackId != new.mediaId) state.servers[trackId] = serv
             state.serverChanged.emit(Unit)
             val sources = server?.sources
             actualSource = when (sources?.size) {

@@ -36,6 +36,10 @@ import dev.brahmkshatriya.echo.playback.PlayerCommands.playCommand
 import dev.brahmkshatriya.echo.playback.PlayerCommands.radioCommand
 import dev.brahmkshatriya.echo.playback.PlayerCommands.resumeCommand
 import dev.brahmkshatriya.echo.playback.PlayerCommands.sleepTimer
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_CATALOG_EXTENSION_ID
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_ENABLED
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_EXTENSION_ID
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.getController
 import dev.brahmkshatriya.echo.playback.PlayerState
 import dev.brahmkshatriya.echo.utils.ContextUtils.listenFuture
@@ -208,18 +212,43 @@ class PlayerViewModel(
     }
 
     fun setQueue(id: String, list: List<Track>, index: Int, context: EchoMediaItem?) {
+        val playbackIds = resolvePlaybackExtensions(id)
+        val primaryId = playbackIds.first()
         withBrowser { controller ->
             val mediaItems = list.map {
                 MediaItemUtils.build(
                     app,
                     downloadFlow.value,
-                    MediaState.Unloaded(id, it),
-                    context
+                    MediaState.Unloaded(primaryId, it),
+                    context,
+                    playbackIds
                 )
             }
             controller.setMediaItems(mediaItems, index, list[index].playedDuration ?: 0)
             controller.prepare()
         }
+    }
+
+    private fun resolvePlaybackExtensions(catalogExtensionId: String): List<String> {
+        if (!settings.getBoolean(SPOTIFY_PROXY_PLAYBACK_ENABLED, false)) {
+            return listOf(catalogExtensionId)
+        }
+        val catalog = settings.getString(
+            SPOTIFY_PROXY_CATALOG_EXTENSION_ID,
+            "spotify"
+        )?.trim().orEmpty()
+        if (catalogExtensionId != catalog) return listOf(catalogExtensionId)
+
+        // Try the new multi-extension setting first.
+        val multiRaw = settings.getString(SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS, "")?.trim().orEmpty()
+        if (multiRaw.isNotBlank()) {
+            val ids = multiRaw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            if (ids.isNotEmpty()) return ids
+        }
+
+        // Fall back to the old single-ID setting.
+        val single = settings.getString(SPOTIFY_PROXY_PLAYBACK_EXTENSION_ID, "")?.trim().orEmpty()
+        return listOf(single.ifBlank { catalogExtensionId })
     }
 
     fun radio(id: String, item: EchoMediaItem, loaded: Boolean) = viewModelScope.launch {
@@ -304,7 +333,8 @@ class PlayerViewModel(
     val tracksFlow = MutableStateFlow<Tracks?>(null)
     val serverAndTracks = tracksFlow.combine(playerState.serverChanged) { tracks, _ -> tracks }
         .combine(playerState.current) { tracks, current ->
-            val server = playerState.servers[current?.mediaItem?.mediaId]?.getOrNull()
+            val server = (playerState.servers[current?.mediaItem?.mediaId]
+                ?: playerState.servers[current?.mediaItem?.track?.id])?.getOrNull()
             val index = current?.mediaItem?.sourceIndex
             Triple(tracks, server, index)
         }.stateIn(viewModelScope, SharingStarted.Lazily, Triple(null, null, null))

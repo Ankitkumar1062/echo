@@ -23,6 +23,7 @@ object PlayerCommands {
     val resumeCommand = SessionCommand("resume", Bundle.EMPTY)
     val imageCommand = SessionCommand("image", Bundle.EMPTY)
 
+    @Suppress("DEPRECATION")
     fun getLikeButton(context: Context, item: MediaItem) = run {
         val builder = CommandButton.Builder()
         if (!item.isLiked) builder
@@ -36,6 +37,7 @@ object PlayerCommands {
         builder.build()
     }
 
+    @Suppress("DEPRECATION")
     fun getRepeatButton(context: Context, repeat: Int) = run {
         val builder = CommandButton.Builder()
         when (repeat) {

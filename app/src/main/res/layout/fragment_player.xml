@@ -80,10 +80,27 @@
             <View
                 android:id="@+id/player_track_cover_placeholder"
                 style="@style/PlayerTrackCoverContainer"
-                app:layout_constraintBottom_toTopOf="@id/player_controls"
+                app:layout_constraintBottom_toTopOf="@id/current_lyric_text"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="parent" />
+
+            <TextView
+                android:id="@+id/current_lyric_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="24dp"
+                android:gravity="center"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:textAppearance="?attr/textAppearanceBodyLarge"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textStyle="bold"
+                app:layout_constraintBottom_toTopOf="@+id/player_controls"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/player_track_cover_placeholder"
+                tools:text="This is the live lyric preview playing right now" />
 
             <include
                 android:id="@+id/player_controls"
@@ -94,8 +111,9 @@
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@+id/player_track_cover_placeholder"
+                app:layout_constraintTop_toBottomOf="@+id/current_lyric_text"
                 app:layout_constraintWidth_max="640dp" />
+
         </androidx.constraintlayout.widget.ConstraintLayout>
 
         <include

@@ -10,17 +10,26 @@ import dev.brahmkshatriya.echo.common.models.Streamable
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.toKey
 import dev.brahmkshatriya.echo.playback.source.StreamableDataSource.Companion.uri
 import dev.brahmkshatriya.echo.utils.CacheUtils.saveToCache
-import java.util.WeakHashMap
 
 class StreamableResolver(
     private val context: Context,
-    private val current: WeakHashMap<String, Result<Streamable.Media.Server>>,
+    private val current: MutableMap<String, Result<Streamable.Media.Server>>,
 ) : Resolver {
 
     @OptIn(UnstableApi::class)
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val (id, index) = dataSpec.uri.toString().toKey().getOrNull() ?: return dataSpec
-        val streamable = runCatching { current[id]!!.getOrThrow().sources[index] }
+        val server = current[id]?.getOrNull()
+            ?: return dataSpec.copy(
+                customData = Result.failure<Streamable.Source>(
+                    Exception("Stream server not resolved for id=$id")
+                )
+            )
+        val streamable: Result<Streamable.Source> =
+            server.sources.getOrNull(index)?.let { Result.success<Streamable.Source>(it) }
+                ?: Result.failure<Streamable.Source>(
+                    Exception("Invalid source index=$index for id=$id")
+                )
         val uri = streamable.map {
             if (!it.isLive)
                 context.saveToCache(it.uri.toString(), dataSpec.uri.toString(), "player")

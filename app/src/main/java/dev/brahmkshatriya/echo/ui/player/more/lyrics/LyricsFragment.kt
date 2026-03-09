@@ -83,21 +83,48 @@ class LyricsFragment : Fragment() {
         binding.lyricsRecyclerView.layoutManager as LinearLayoutManager
     }
 
+    private var metadataSubtitle: String? = null
+
     private fun updateLyrics(current: Long) {
-        val lyrics = currentLyrics as? Lyrics.Timed ?: return
-        val currentTime = lyrics.list.getOrNull(currentLyricsPos)?.endTime ?: -1
-        if (currentTime < current || current <= 0) {
-            val currentIndex = lyrics.list.indexOfLast { lyric ->
-                lyric.startTime <= current
-            }
+        val list = when (val lyrics = currentLyrics) {
+            is Lyrics.Timed -> lyrics.list
+            is Lyrics.WordByWord -> lyrics.list.flatten()
+            else -> return
+        }
+        val currentIndex = list.indexOfLast { it.startTime <= current }
+
+        if (currentIndex != currentLyricsPos) {
+            currentLyricsPos = currentIndex
             lyricAdapter.updateCurrent(currentIndex)
-            if (!shouldAutoScroll) return
-            binding.appBarLayout.setExpanded(false)
-            slideDown()
-            if (currentIndex < 0) return
-            val smoothScroller = CenterSmoothScroller(requireContext())
-            smoothScroller.targetPosition = currentIndex
-            layoutManager.startSmoothScroll(smoothScroller)
+
+            val line = list.getOrNull(currentIndex)?.text?.trim()
+            binding.lyricsItem.root.subtitle = if (line.isNullOrBlank()) metadataSubtitle else line
+
+            if (shouldAutoScroll && currentIndex >= 0) {
+                if (binding.lyricsRecyclerView.canScrollVertically(1)) {
+                    binding.appBarLayout.setExpanded(false)
+                    slideDown()
+                }
+
+                val totalItems = lyricAdapter.itemCount
+                val firstVisiblePosition = layoutManager.findFirstVisibleItemPosition()
+                val lastVisiblePosition = layoutManager.findLastVisibleItemPosition()
+
+                val isBottomBoundaryVisible = (lastVisiblePosition == totalItems - 1)
+                val isTopBoundaryVisible = (firstVisiblePosition == 0)
+
+                if ((isBottomBoundaryVisible && currentIndex >= firstVisiblePosition) ||
+                    (isTopBoundaryVisible && currentIndex <= lastVisiblePosition)) {
+
+                    val standardScroller = LinearSmoothScroller(requireContext())
+                    standardScroller.targetPosition = currentIndex
+                    layoutManager.startSmoothScroll(standardScroller)
+                } else {
+                    val smoothScroller = CenterSmoothScroller(requireContext())
+                    smoothScroller.targetPosition = currentIndex
+                    layoutManager.startSmoothScroll(smoothScroller)
+                }
+            }
         }
     }
 
@@ -105,6 +132,7 @@ class LyricsFragment : Fragment() {
         setupTransition(view, false, axis = MaterialSharedAxis.Y)
         FastScrollerHelper.applyTo(binding.lyricsRecyclerView)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, _ -> CONSUMED }
+
         observe(uiViewModel.moreSheetState) {
             binding.root.keepScreenOn = it == BottomSheetBehavior.STATE_EXPANDED
         }
@@ -222,7 +250,8 @@ class LyricsFragment : Fragment() {
         }
         isVisible = true
         setTitle(lyrics.title)
-        setSubtitle(lyrics.subtitle)
+        metadataSubtitle = lyrics.subtitle
+        setSubtitle(metadataSubtitle)
         setBackgroundResource(R.color.amoled_bg)
     }
 
@@ -236,7 +265,7 @@ class LyricsFragment : Fragment() {
         }
 
         override fun getVerticalSnapPreference() = SNAP_TO_START
-        override fun calculateTimeForDeceleration(dx: Int) = 650
+        override fun calculateTimeForDeceleration(dx: Int) = 300
     }
 
     @SuppressLint("WrongConstant")

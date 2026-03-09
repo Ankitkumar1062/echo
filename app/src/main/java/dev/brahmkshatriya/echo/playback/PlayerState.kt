@@ -9,7 +9,6 @@ import dev.brahmkshatriya.echo.playback.MediaItemUtils.context
 import dev.brahmkshatriya.echo.playback.MediaItemUtils.track
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import java.util.WeakHashMap
 
 data class PlayerState(
     val current: MutableStateFlow<Current?> = MutableStateFlow(null),
@@ -17,7 +16,12 @@ data class PlayerState(
     val session: MutableStateFlow<Int> = MutableStateFlow(0)
 ) {
 
-    val servers: WeakHashMap<String, Result<Streamable.Media.Server>> = WeakHashMap()
+    val servers: MutableMap<String, Result<Streamable.Media.Server>> =
+        object : LinkedHashMap<String, Result<Streamable.Media.Server>>(64, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, Result<Streamable.Media.Server>>?
+            ) = size > 100
+        }
     val serverChanged = MutableSharedFlow<Unit>()
 
     data class Current(

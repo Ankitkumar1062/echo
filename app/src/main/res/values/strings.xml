@@ -112,6 +112,14 @@
 
     <string name="unmetered_stream_quality">Unmetered Stream Quality</string>
     <string name="unmetered_stream_quality_summary">The quality of the stream when connected to an unmetered network. This will override the default stream quality.</string>
+    <string name="spotify_proxy_playback">Spotify Proxy Playback</string>
+    <string name="spotify_proxy_playback_summary">Use one extension for Spotify catalog UI and another extension for stream playback.</string>
+    <string name="spotify_proxy_catalog_extension_id">Catalog Extension Id</string>
+    <string name="spotify_proxy_catalog_extension_id_summary">Default is spotify. Proxy mode applies only when playing from this extension id.</string>
+    <string name="spotify_proxy_playback_extension_id">Playback Extension Id</string>
+    <string name="spotify_proxy_playback_extension_id_summary">Extension id to use for stream playback (for example youtube). Leave empty to disable rerouting.</string>
+    <string name="spotify_proxy_playback_extension_ids">Playback Extension Ids</string>
+    <string name="spotify_proxy_playback_extension_ids_summary">Comma-separated list of extension ids to search for playback (e.g. "youtube, jiosaavn"). All are searched in parallel; the best match wins. Overrides the single id field above when set.</string>
 
     <string name="behavior">Behavior</string>
 
@@ -447,4 +455,19 @@
     <string name="exported_to">Exported to %1$s</string>
     <string name="import_settings">Import Settings</string>
     <string name="import_settings_summary">Import settings from a file</string>
+
+    <!-- Stats / Analytics -->
+    <string name="stats">Stats</string>
+    <string name="stats_overview">Overview</string>
+    <string name="stats_listening_time">Listening Time</string>
+    <string name="stats_total_plays">Total Plays</string>
+    <string name="stats_top_artists">Top Artists</string>
+    <string name="stats_top_tracks">Top Tracks</string>
+    <string name="stats_top_albums">Top Albums</string>
+    <string name="stats_last_7_days">Last 7 days</string>
+    <string name="stats_last_30_days">Last 30 days</string>
+    <string name="stats_all_time">All time</string>
+    <string name="stats_n_plays">%1$d plays</string>
+    <string name="stats_time_mins">%1$s min</string>
+    <string name="stats_time_hours_mins">%1$s hr %2$s min</string>
 </resources>

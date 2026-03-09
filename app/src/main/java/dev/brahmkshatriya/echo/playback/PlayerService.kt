@@ -12,7 +12,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.TrackSelectionParameters
-import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences    .AUDIO_OFFLOAD_MODE_DISABLED
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -38,6 +38,7 @@ import dev.brahmkshatriya.echo.playback.listener.EffectsListener
 import dev.brahmkshatriya.echo.playback.listener.MediaSessionServiceListener
 import dev.brahmkshatriya.echo.playback.listener.PlayerEventListener
 import dev.brahmkshatriya.echo.playback.listener.PlayerRadio
+import dev.brahmkshatriya.echo.analytics.PlayHistoryRecorder
 import dev.brahmkshatriya.echo.playback.listener.TrackingListener
 import dev.brahmkshatriya.echo.playback.renderer.PlayerBitmapLoader
 import dev.brahmkshatriya.echo.playback.renderer.RenderersFactory
@@ -49,6 +50,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import org.koin.android.ext.android.get
 import org.koin.android.ext.android.inject
 import java.io.File
 
@@ -113,6 +115,9 @@ class PlayerService : MediaLibraryService() {
             TrackingListener(player, scope, extensions, state.current, app.throwFlow)
         )
         player.addListener(effects)
+
+        // Initialize play history recording
+        get<PlayHistoryRecorder>()
         app.settings.registerOnSharedPreferenceChangeListener(listener)
 
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
@@ -206,6 +211,12 @@ class PlayerService : MediaLibraryService() {
 
         const val STREAM_QUALITY = "stream_quality"
         const val UNMETERED_STREAM_QUALITY = "unmetered_stream_quality"
+        const val SPOTIFY_PROXY_PLAYBACK_ENABLED = "spotify_proxy_playback_enabled"
+        const val SPOTIFY_PROXY_CATALOG_EXTENSION_ID = "spotify_proxy_catalog_extension_id"
+        /** Legacy single-ID key — kept for reading old preferences. */
+        const val SPOTIFY_PROXY_PLAYBACK_EXTENSION_ID = "spotify_proxy_playback_extension_id"
+        /** New comma-separated list key, e.g. "youtube, jiosaavn". Takes precedence if non-blank. */
+        const val SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS = "spotify_proxy_playback_extension_ids"
         val streamQualities = arrayOf("highest", "medium", "lowest")
 
         fun selectServerIndex(

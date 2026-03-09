@@ -37,9 +37,14 @@ object MediaItemUtils {
         downloads: List<Downloader.Info>,
         state: MediaState.Unloaded<Track>,
         context: EchoMediaItem?,
+        proxyExtensionIds: List<String> = emptyList(),
     ): MediaItem {
         val item = MediaItem.Builder()
-        val metadata = state.toMetaData(bundleOf(), downloads, context, false, app)
+        val extras = bundleOf()
+        if (proxyExtensionIds.isNotEmpty()) {
+            extras.putString(PROXY_EXTENSION_IDS_KEY, proxyExtensionIds.joinToString(","))
+        }
+        val metadata = state.toMetaData(extras, downloads, context, false, app)
         item.setMediaMetadata(metadata)
         item.setMediaId(state.item.id)
         item.setUri(state.item.id)
@@ -228,6 +233,10 @@ object MediaItemUtils {
     val Bundle?.unloadedCover
         get() = this?.getSerialized<ImageHolder?>("unloadedCover")?.getOrNull()
     val Bundle?.downloaded get() = this?.getSerialized<List<String>>("downloaded")?.getOrNull()
+    val Bundle?.proxyExtensionIds: List<String>
+        get() = this?.getString(PROXY_EXTENSION_IDS_KEY)
+            ?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }
+            ?: emptyList()
 
     val MediaItem.state get() = mediaMetadata.extras.state
     val MediaItem.track get() = mediaMetadata.extras.track
@@ -244,6 +253,7 @@ object MediaItemUtils {
     val MediaItem.retries get() = mediaMetadata.extras.retries
     val MediaItem.unloadedCover get() = mediaMetadata.extras.unloadedCover
     val MediaItem.downloaded get() = mediaMetadata.extras.downloaded
+    val MediaItem.proxyExtensionIds get() = mediaMetadata.extras.proxyExtensionIds
 
     private fun Streamable.SubtitleType.toMimeType() = when (this) {
         Streamable.SubtitleType.VTT -> MimeTypes.TEXT_VTT
@@ -264,6 +274,9 @@ object MediaItemUtils {
 
     const val SHOW_BACKGROUND = "show_background"
     fun SharedPreferences?.showBackground() = this?.getBoolean(SHOW_BACKGROUND, true) ?: true
+
+    /** Bundle extras key for the comma-joined ordered list of proxy playback extension IDs. */
+    const val PROXY_EXTENSION_IDS_KEY = "proxyExtensionIds"
 
     fun MediaItem.serverWithDownloads(
         context: Context,

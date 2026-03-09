@@ -18,6 +18,7 @@ import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.BACKGROUND_GRADIE
 import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.applyGradient
 import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.applyInsets
 import dev.brahmkshatriya.echo.ui.main.search.SearchFragment
+import dev.brahmkshatriya.echo.ui.stats.StatsFragment
 import dev.brahmkshatriya.echo.utils.ContextUtils.getSettings
 import dev.brahmkshatriya.echo.utils.ContextUtils.observe
 import dev.brahmkshatriya.echo.utils.ui.AnimationUtils.setupTransition
@@ -56,6 +57,7 @@ class MainFragment : Fragment() {
             val toShow = when (it) {
                 1 -> addIfNull<SearchFragment>("search")
                 2 -> addIfNull<LibraryFragment>("library")
+                3 -> addIfNull<StatsFragment>("stats")
                 else -> addIfNull<HomeFragment>("home")
             }
 

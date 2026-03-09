@@ -1,5 +1,7 @@
 package dev.brahmkshatriya.echo.di
 
+import dev.brahmkshatriya.echo.analytics.PlayHistoryRecorder
+import dev.brahmkshatriya.echo.analytics.db.AnalyticsDatabase
 import dev.brahmkshatriya.echo.download.DownloadWorker
 import dev.brahmkshatriya.echo.download.Downloader
 import dev.brahmkshatriya.echo.download.db.DownloadDatabase
@@ -20,6 +22,7 @@ import dev.brahmkshatriya.echo.ui.media.MediaViewModel
 import dev.brahmkshatriya.echo.ui.player.PlayerViewModel
 import dev.brahmkshatriya.echo.ui.player.more.info.TrackInfoViewModel
 import dev.brahmkshatriya.echo.ui.player.more.lyrics.LyricsViewModel
+import dev.brahmkshatriya.echo.ui.stats.StatsViewModel
 import dev.brahmkshatriya.echo.ui.playlist.create.CreatePlaylistViewModel
 import dev.brahmkshatriya.echo.ui.playlist.delete.DeletePlaylistViewModel
 import dev.brahmkshatriya.echo.ui.playlist.edit.EditPlaylistViewModel
@@ -43,6 +46,12 @@ object DI {
         singleOf(::ExtensionLoader)
     }
 
+    private val analyticsModule = module {
+        includes(baseModule)
+        singleOf(AnalyticsDatabase::create)
+        single { get<AnalyticsDatabase>().playHistoryDao() }
+    }
+
     private val downloadModule = module {
         includes(extensionModule)
         singleOf(DownloadDatabase::create)
@@ -52,8 +61,10 @@ object DI {
 
     private val playerModule = module {
         includes(extensionModule)
+        includes(analyticsModule)
         singleOf(PlayerService::getCache)
         single { PlayerState() }
+        singleOf(::PlayHistoryRecorder)
     }
 
     private val uiModules = module {
@@ -80,6 +91,8 @@ object DI {
         viewModelOf(::EditPlaylistViewModel)
 
         viewModelOf(::DownloadViewModel)
+
+        viewModelOf(::StatsViewModel)
     }
 
     val appModule = module {

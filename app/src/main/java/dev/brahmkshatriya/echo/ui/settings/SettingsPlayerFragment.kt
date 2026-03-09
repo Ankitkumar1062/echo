@@ -14,6 +14,9 @@ import dev.brahmkshatriya.echo.playback.PlayerService.Companion.CACHE_SIZE
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.CLOSE_PLAYER
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.MORE_BRAIN_CAPACITY
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SKIP_SILENCE
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_CATALOG_EXTENSION_ID
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS
+import dev.brahmkshatriya.echo.playback.PlayerService.Companion.SPOTIFY_PROXY_PLAYBACK_ENABLED
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.STREAM_QUALITY
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.UNMETERED_STREAM_QUALITY
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.streamQualities
@@ -24,6 +27,7 @@ import dev.brahmkshatriya.echo.ui.settings.AudioEffectsFragment.Companion.AUDIO_
 import dev.brahmkshatriya.echo.utils.ContextUtils.SETTINGS_NAME
 import dev.brahmkshatriya.echo.utils.ui.prefs.MaterialListPreference
 import dev.brahmkshatriya.echo.utils.ui.prefs.MaterialSliderPreference
+import dev.brahmkshatriya.echo.utils.ui.prefs.MaterialTextInputPreference
 import dev.brahmkshatriya.echo.utils.ui.prefs.TransitionPreference
 
 class SettingsPlayerFragment : BaseSettingsFragment() {
@@ -83,6 +87,36 @@ class SettingsPlayerFragment : BaseSettingsFragment() {
                     layoutResource = R.layout.preference
                     isIconSpaceReserved = false
                     setDefaultValue("off")
+                    addPreference(this)
+                }
+
+                SwitchPreferenceCompat(context).apply {
+                    key = SPOTIFY_PROXY_PLAYBACK_ENABLED
+                    title = getString(R.string.spotify_proxy_playback)
+                    summary = getString(R.string.spotify_proxy_playback_summary)
+                    layoutResource = R.layout.preference_switch
+                    isIconSpaceReserved = false
+                    setDefaultValue(false)
+                    addPreference(this)
+                }
+
+                MaterialTextInputPreference(context).apply {
+                    key = SPOTIFY_PROXY_CATALOG_EXTENSION_ID
+                    title = getString(R.string.spotify_proxy_catalog_extension_id)
+                    summary = getString(R.string.spotify_proxy_catalog_extension_id_summary)
+                    layoutResource = R.layout.preference
+                    isIconSpaceReserved = false
+                    setDefaultValue("spotify")
+                    addPreference(this)
+                }
+
+                MaterialTextInputPreference(context).apply {
+                    key = SPOTIFY_PROXY_PLAYBACK_EXTENSION_IDS
+                    title = getString(R.string.spotify_proxy_playback_extension_ids)
+                    summary = getString(R.string.spotify_proxy_playback_extension_ids_summary)
+                    layoutResource = R.layout.preference
+                    isIconSpaceReserved = false
+                    setDefaultValue("")
                     addPreference(this)
                 }
             }

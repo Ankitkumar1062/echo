@@ -88,7 +88,8 @@ class UiViewModel(
     val navIds = listOf(
         R.id.homeFragment,
         R.id.searchFragment,
-        R.id.libraryFragment
+        R.id.libraryFragment,
+        R.id.statsFragment
     )
 
     val currentNavBackground = MutableStateFlow<Drawable?>(null)

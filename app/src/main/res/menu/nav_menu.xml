@@ -15,4 +15,9 @@
         android:icon="@drawable/anim_bookmark"
         android:title="@string/library" />
 
+    <item
+        android:id="@+id/statsFragment"
+        android:icon="@drawable/anim_bar_chart"
+        android:title="@string/stats" />
+
 </menu>

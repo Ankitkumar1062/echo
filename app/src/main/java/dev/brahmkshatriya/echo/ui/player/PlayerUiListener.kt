@@ -39,7 +39,7 @@ class PlayerUiListener(
         viewModel.previousEnabled.value = player.currentMediaItemIndex >= 0
     }
 
-    private val delay = 500L
+    private val delay = 100L
     private val threshold = 0.2f
     private val updateProgressRunnable = Runnable { updateProgress() }
     private val handler = Handler(Looper.getMainLooper()).also {
