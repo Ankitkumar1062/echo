@@ -21,6 +21,7 @@ import dev.brahmkshatriya.echo.playback.PlayerService.Companion.STREAM_QUALITY
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.UNMETERED_STREAM_QUALITY
 import dev.brahmkshatriya.echo.playback.PlayerService.Companion.streamQualities
 import dev.brahmkshatriya.echo.playback.listener.PlayerRadio.Companion.AUTO_START_RADIO
+import dev.brahmkshatriya.echo.playback.listener.PlayerRadio.Companion.RADIO_EXTENSION_ID
 import dev.brahmkshatriya.echo.ui.common.FragmentUtils.openFragment
 import dev.brahmkshatriya.echo.ui.player.PlayerViewModel.Companion.KEEP_QUEUE
 import dev.brahmkshatriya.echo.ui.settings.AudioEffectsFragment.Companion.AUDIO_FX
@@ -175,6 +176,16 @@ class SettingsPlayerFragment : BaseSettingsFragment() {
                     layoutResource = R.layout.preference_switch
                     isIconSpaceReserved = false
                     setDefaultValue(true)
+                    addPreference(this)
+                }
+
+                MaterialTextInputPreference(context).apply {
+                    key = RADIO_EXTENSION_ID
+                    title = getString(R.string.radio_extension_id)
+                    summary = getString(R.string.radio_extension_id_summary)
+                    layoutResource = R.layout.preference
+                    isIconSpaceReserved = false
+                    setDefaultValue("")
                     addPreference(this)
                 }
 

@@ -135,6 +135,9 @@
     <string name="auto_start_radio">Auto Start Radio</string>
     <string name="auto_start_radio_summary">Automatically add related songs of track in the playlist, to have an infinite queue</string>
 
+    <string name="radio_extension_id">Radio Extension ID</string>
+    <string name="radio_extension_id_summary">Always use this extension for radio (e.g. YouTube Music). Leave empty to use the current extension.</string>
+
     <string name="cache_size">Cache Size</string>
     <string name="cache_size_summary">Size in MB to cache audio and video</string>
 

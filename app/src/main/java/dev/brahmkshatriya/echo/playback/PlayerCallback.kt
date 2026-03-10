@@ -240,6 +240,11 @@ class PlayerCallback(
         val loaded = args.getBoolean("loaded", false)
         val shuffle = args.getBoolean("shuffle", false)
         val extension = extensions.music.getExtension(extId) ?: return@future error
+        
+        // Clear existing radio state so picking a new track correctly triggers radio calculation 
+        // exclusively for this newly played entity, ignoring legacy queue data.
+        radioFlow.value = PlayerState.Radio.Empty
+        
         when (item) {
             is Track -> {
                 val mediaItem = MediaItemUtils.build(

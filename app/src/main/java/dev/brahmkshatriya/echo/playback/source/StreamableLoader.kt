@@ -324,20 +324,34 @@ class StreamableLoader(
             s.replace(NORMALIZE_WHITESPACE, " ").trim()
         }
 
+        val isExact = { it: Track -> isExactMatch(original, it) }
+
         // Primary query: "cleanTitle artist" — works well on most platforms.
         val primaryQuery = if (artist.isBlank()) cleanedQueryTitle
         else "$cleanedQueryTitle $artist"
 
-        var candidates = loadSearchCandidates(extension, primaryQuery)
+        var candidates = loadSearchCandidates(extension, primaryQuery, isExact)
 
-        // First fallback: "artist - cleanTitle" ordering (some platforms rank better this way).
+        // Fallbacks: run concurrently to save network time.
         if (candidates.none { shouldConsider(original, it) } && artist.isNotBlank()) {
-            candidates = loadSearchCandidates(extension, "$artist - $cleanedQueryTitle")
-        }
-
-        // Second fallback: cleaned title only (broadest net).
-        if (candidates.none { shouldConsider(original, it) } && artist.isNotBlank()) {
-            candidates = loadSearchCandidates(extension, cleanedQueryTitle)
+            candidates = coroutineScope {
+                val fallback1 = async {
+                    try { loadSearchCandidates(extension, "$artist - $cleanedQueryTitle", isExact) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Throwable) { emptyList() }
+                }
+                val fallback2 = async {
+                    try { loadSearchCandidates(extension, cleanedQueryTitle, isExact) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Throwable) { emptyList() }
+                }
+                
+                val res1 = fallback1.await()
+                if (res1.any { shouldConsider(original, it) }) {
+                    fallback2.cancel()
+                    res1
+                } else fallback2.await()
+            }
         }
 
         if (candidates.isEmpty()) throw Exception("No matching track found for \"$primaryQuery\"")
@@ -349,13 +363,11 @@ class StreamableLoader(
 
         if (unique.isEmpty()) throw Exception("No passing candidates for \"$primaryQuery\"")
 
-        // Fast path: if ISRC is available, check for a definitive match first.
-        if (!original.isrc.isNullOrBlank()) {
-            val isrcHit = unique.firstOrNull { it.isrc.equals(original.isrc, true) }
-            if (isrcHit != null) return@runCatching listOf(isrcHit) +
-                    unique.filter { it.id != isrcHit.id }
-                        .sortedByDescending { scoreMatch(original, it) }
-        }
+        // Fast path: if a definitive exact match is found, check for a definitive match first.
+        val exactHit = unique.firstOrNull { isExact(it) }
+        if (exactHit != null) return@runCatching listOf(exactHit) +
+                unique.filter { it.id != exactHit.id }
+                    .sortedByDescending { scoreMatch(original, it) }
 
         unique.sortedByDescending { candidate -> scoreMatch(original, candidate) }
     }
@@ -389,7 +401,8 @@ class StreamableLoader(
     private suspend fun loadSearchCandidates(
         extension: Extension<*>,
         query: String,
-    ): List<Track> {
+        shortCircuit: ((Track) -> Boolean)? = null
+    ): List<Track> = coroutineScope {
         val feed = extension.getAs<SearchFeedClient, Feed<Shelf>> {
             loadSearchFeed(query)
         }.getOrThrow()
@@ -400,22 +413,32 @@ class StreamableLoader(
                     it.title.equals("Song", ignoreCase = true)
         }
 
-        val songTracks = extractTracks(feed.getPagedData(songsTab))
-
         // Also pull from the "Videos" tab — on YT Music many official CJK tracks
         // are only available as videos, so we must include them for the scorer.
         val videosTab = feed.tabs.firstOrNull {
             it.title.equals("Videos", ignoreCase = true) ||
                     it.title.equals("Video", ignoreCase = true)
         }
-        val videoTracks = if (videosTab != null) extractTracks(feed.getPagedData(videosTab))
-        else emptyList()
+
+        val songTracksDeferred = async { extractTracks(feed.getPagedData(songsTab)) }
+        val videoTracksDeferred = async {
+            if (videosTab != null) extractTracks(feed.getPagedData(videosTab))
+            else emptyList()
+        }
+
+        val songTracks = songTracksDeferred.await()
+        if (shortCircuit != null && songTracks.any { shortCircuit(it) }) {
+            videoTracksDeferred.cancel()
+            return@coroutineScope songTracks.distinctBy { it.id }
+        }
+
+        val videoTracks = videoTracksDeferred.await()
 
         val merged = (songTracks + videoTracks).distinctBy { it.id }
-        if (merged.isNotEmpty()) return merged
+        if (merged.isNotEmpty()) return@coroutineScope merged
 
         // If both tabs returned nothing, fall back to the default tab.
-        return extractTracks(feed.getPagedData(null))
+        extractTracks(feed.getPagedData(null))
     }
 
     private suspend fun extractTracks(data: Feed.Data<Shelf>): List<Track> {
